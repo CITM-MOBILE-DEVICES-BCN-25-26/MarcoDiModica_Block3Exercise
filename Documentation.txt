@@ -1,0 +1,87 @@
+Block 3 - Clean Refactor - Documentation
+
+
+1. Main problems of the original design
+
+    - ShopManager era un MonoBehaviour que mezclaba UI, reglas de negocio, PlayerPrefs y audio
+    - Cada BuyNombreDeItem tenia sus propios chequeos duplicados con los de RefreshUI
+    - PlayerPrefs se llamaba desde el script lo que imposible hacer tests de persistencia, o cambiar el tipo de persistencia sin tocar logica
+    - Audio dentro del flujo de compra,  dificil de mantener
+    - Precios y limites como SerializeField en vez de un catalogo centralizado, dificil anadir mas items
+    - Imposible de testear en EditMode: depende de MonoBehaviour, Text, Button, AudioSource y PlayerPrefs
+    - Anadir un item nuevo obliga a tocar el ShopManager entero
+
+2. Responsibilities of each layer in your solution
+
+Domain
+    Solamente delcara entidades y logica de negocio pura, sin referencias a Unity ni detalles de implementacion
+    - Player con miembros: monedas, nivel e Inventory. Funciones: Spend, AddCoins, GainLevel
+    - Inventory diccionario<itemId, cantidad> funciones Add, Has, GetQuantity
+    - ShopItem object con id, nombre, coste, max cantidad, nivel necesario
+    - ShopCatalogue domain service, lookup de items por id
+
+Application
+    ORQUESTADOR :0  Solo conoce el dominio y sus propias interfaces (0 referencias a Unity) cada uno tiene su responsabilidad
+    - IPlayerRepository interfaz de persistencia
+    - ShopService logica de compra pura (validar reglas, funciones de Player).
+    - Use cases: no se como explicarlo mejor, cada uno hace una cosa concreta es decir un caso de uso
+    - Responses y enums por carpeta de use case
+
+Infrastructure
+    Implementaciones concretas para unity, obviamente aqui depende de unity
+    - PlayerPrefsPlayerRepository: implementa IPlayerRepository con PlayerPrefs
+    - Presentation: View (MonoBehaviour) + Presenter (C#) + IShopView
+
+Bootstrap
+    Composer, Catalogue de ShopItems, Repository(Persistencia), UseCases y Presenter y Disposer :P
+
+Tests
+    EditMode, NUnit. Sin Unity.
+
+
+3. Explanation of your use cases
+
+BuyItemUseCase.Execute(itemId) -> Carga Player, delega en ShopService. Buy, guarda si exito.
+
+GetShopStatusUseCase.Execute() -> Carga Player y devuelve ShopStatusResponse con la lista de items (cantidad actual, max, canBuy, etc). El presenter no calcula reglas.
+
+AddCoinsUseCase, LevelUpUseCase, ResetPlayerUseCase -> Utilidades de debug. Cargan Player, modifican, guardan
+
+ShopService
+    Domain/application service. Centraliza las reglas de compra
+       
+        canAfford, requiredLevel, maxQuantity. Devuelve PurchaseStatus
+        semantico (NotEnoughCoins, MaxUsesReached, RequiredLevelNotReached,
+        AlreadyOwned, Purchased).
+
+
+4. Explanation of how persistence is abstracted
+
+La aplicacion solo conoce IPlayerRepository (Load y Save).
+PlayerPrefsPlayerRepository en Infrastructure es la unica implementacion
+y carga/guarda el inventario del player.
+Cambiar a JSON, CSV o un excel si te apetece solo requiero una nueva clase
+que implementa la interfaz y no se toca ni un use case
+
+
+5. Explanation of how your solution can be tested without Unity
+
+Domain y Application no referencian UnityEngine
+Los tests usan InMemoryPlayerRepository (FAKE) que guarda el
+Player en memoria y cuenta llamadas a Save. Cada test construye su
+contexto con la config que necesita y verifica:
+    - el response que returnea
+    - el estado del Player
+    - numero de Saves (0 si no se compra, 1 si se compra)
+Cubriendo los 10 casos que se piden
+
+
+6. Brief justification of why your solution is better than the original
+
+- las reglas se validan sin abrir Unity
+- SRP, cada clase tiene una sola razon para cambiar
+- Reemplazable: cambiar persistencia es solamente hacer la implementacion de IPlayerRepository con un nuevo sistema como por ejemplo JSON
+- Sin duplicación, las reglas viven solo en ShopService
+- Extensible: anadir un item es anadir un ShopItem al catalogo y un binding en el View
+  Cero codigo nuevo en use cases ni en presenter
+- ShopView solo lanza eventos y "pone bonito". El Presenter es quien hace de director/manager/orquestador o como lo quieras llamar ajaj
